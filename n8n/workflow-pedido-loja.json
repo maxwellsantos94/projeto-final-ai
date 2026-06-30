@@ -1,0 +1,70 @@
+{
+  "name": "Pedido Loja - Análise IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pedido-loja",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook Pedido",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "pedido-loja"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um consultor de vendas de uma loja virtual de eletrônicos.\nAnalise o pedido recebido abaixo.\nRetorne APENAS um JSON válido (sem markdown, sem ```) contendo:\n- perfilCliente (string: ex. Cliente Premium, Cliente Gamer, Cliente Básico)\n- produtosRecomendados (array de strings com nomes de produtos eletrônicos)\n- mensagemPersonalizada (string com mensagem amigável ao cliente)\n- cupomDesconto (string com código de cupom, ex. TECH10)\n\nConsidere o valor da compra e os produtos adquiridos.\n\nPedido:\n{{ JSON.stringify($json.body) }}"
+      },
+      "id": "gemini-node",
+      "name": "Gemini IA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [500, 300],
+      "notes": "Configure credencial Google Gemini (API Key gratuita em ai.google.dev)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst raw = input.output || input.text || JSON.stringify(input);\n\nlet parsed;\ntry {\n  const jsonMatch = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);\n} catch (e) {\n  parsed = {\n    perfilCliente: 'Cliente Tech',\n    produtosRecomendados: ['Headset Gamer', 'SSD 1TB'],\n    mensagemPersonalizada: 'Obrigado pela compra!',\n    cupomDesconto: 'TECH10'\n  };\n}\n\nconst pedidoId = $('Webhook Pedido').first().json.body.id;\nconst recomendacoes = Array.isArray(parsed.produtosRecomendados)\n  ? parsed.produtosRecomendados.join(', ')\n  : (parsed.produtosRecomendados || '');\n\nreturn [{\n  json: {\n    pedidoId,\n    perfilCliente: parsed.perfilCliente,\n    recomendacoes,\n    cupomDesconto: parsed.cupomDesconto || 'TECH10',\n    mensagemIA: parsed.mensagemPersonalizada || parsed.mensagemIA\n  }\n}];"
+      },
+      "id": "code-node",
+      "name": "Processar Resposta IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://host.docker.internal:8080/pedidos/{{ $json.pedidoId }}/analise",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"perfilCliente\": \"{{ $json.perfilCliente }}\",\n  \"recomendacoes\": \"{{ $json.recomendacoes }}\",\n  \"cupomDesconto\": \"{{ $json.cupomDesconto }}\",\n  \"mensagemIA\": \"{{ $json.mensagemIA }}\"\n}",
+        "options": {}
+      },
+      "id": "http-node",
+      "name": "Enviar para Spring Boot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Pedido": {
+      "main": [[{ "node": "Gemini IA", "type": "main", "index": 0 }]]
+    },
+    "Gemini IA": {
+      "main": [[{ "node": "Processar Resposta IA", "type": "main", "index": 0 }]]
+    },
+    "Processar Resposta IA": {
+      "main": [[{ "node": "Enviar para Spring Boot", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
